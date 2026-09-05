@@ -1,0 +1,420 @@
+// CCDI Sorsogon - Web-Based OJT Monitoring System
+// Prisma schema - PostgreSQL (2-role: ADMIN / STUDENT)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// =========================================================================
+// ENUMS
+// =========================================================================
+
+enum UserRole {
+  ADMIN
+  STUDENT
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  PENDING
+}
+
+enum OjtStatus {
+  NOT_STARTED
+  ONGOING
+  COMPLETED
+  FAILED
+}
+
+enum DtrStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+}
+
+enum TaskStatus {
+  COMPLETED
+  ONGOING
+  UNDONE
+}
+
+enum NarrativeReportStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum WeeklyReportStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum AnnouncementPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum NotificationCategory {
+  DTR
+  WEEKLY_REPORT
+  TASK
+  ANNOUNCEMENT
+  SYSTEM
+}
+
+// =========================================================================
+// CORE: USER
+// =========================================================================
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  username     String?    @unique
+  passwordHash String
+  role         UserRole
+  status       UserStatus @default(ACTIVE)
+
+  firstName String
+  lastName  String
+  avatarUrl String?
+  phone     String?
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  student     Student?
+
+  auditLogs             AuditLog[]
+  announcements         Announcement[]
+  notifications         Notification[]
+  passwordResetTokens   PasswordResetToken[]
+  systemSettings        SystemSetting[]
+
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// =========================================================================
+// STUDENT (includes OJT profile)
+// =========================================================================
+
+model Student {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  studentId  String  @unique
+  firstName  String
+  middleName String?
+  lastName   String
+  course     String
+  yearLevel  Int
+  section    String?
+
+  contactNumber String?
+  address       String?
+
+  // OJT Information
+  companyName     String?
+  companyAddress  String?
+  designation     String?
+
+  requiredHours   Float   @default(500)
+  completedHours  Float   @default(0)
+
+  startDate       DateTime?
+  expectedEndDate DateTime?
+  actualEndDate   DateTime?
+
+  status    OjtStatus @default(NOT_STARTED)
+  archived  Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dtrRecords      DtrRecord[]
+  weeklyReports   WeeklyReport[]
+  tasks           Task[]
+  ojtEvaluations  OjtEvaluation[]
+  narrativeReport NarrativeReport?
+
+  @@index([status])
+  @@index([archived])
+  @@map("students")
+}
+
+// =========================================================================
+// DTR (Daily Time Record)
+// =========================================================================
+
+model DtrRecord {
+  id        String  @id @default(uuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  date         DateTime
+  timeIn       DateTime?
+  timeOut      DateTime?
+  breakMinutes Int       @default(60)
+  totalHours   Float     @default(0)
+
+  status  DtrStatus @default(PRESENT)
+  remarks String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([studentId, date])
+  @@index([studentId])
+  @@index([date])
+  @@map("dtr_records")
+}
+
+// =========================================================================
+// WEEKLY ACCOMPLISHMENT REPORT
+// =========================================================================
+
+model WeeklyReport {
+  id        String  @id @default(uuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  weekNumber    Int
+  weekStartDate DateTime
+  weekEndDate   DateTime
+  totalHours    Float              @default(0)
+  status        WeeklyReportStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities WeeklyReportActivity[]
+
+  @@unique([studentId, weekNumber])
+  @@index([studentId])
+  @@map("weekly_reports")
+}
+
+model WeeklyReportActivity {
+  id             String       @id @default(uuid())
+  weeklyReportId String
+  weeklyReport   WeeklyReport @relation(fields: [weeklyReportId], references: [id], onDelete: Cascade)
+
+  date          DateTime
+  activity      String
+  description   String?
+  skillsLearned String?
+  remarks       String?
+  hoursSpent    Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([weeklyReportId])
+  @@map("weekly_report_activities")
+}
+
+// =========================================================================
+// OJT EVALUATION FORM
+// =========================================================================
+
+model OjtEvaluation {
+  id              String   @id @default(uuid())
+  studentId       String
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  department      String?
+  trainingPeriod  String?
+  supervisorName  String?
+  evaluationDate  DateTime @default(now())
+
+  // I. WORK PERFORMANCE (40%)
+  qualityOfWork               Int?
+  productivityEfficiency      Int?
+  accuracyAttentionToDetail   Int?
+  abilityToFollowInstructions Int?
+  abilityToWorkIndependently  Int?
+
+  // II. KNOWLEDGE & SKILLS (25%)
+  understandingOfTasks        Int?
+  technicalSkills             Int?
+  problemSolvingSkills        Int?
+  abilityToLearnApplyFeedback Int?
+
+  // III. WORK ATTITUDE & PROFESSIONALISM (20%)
+  punctualityAttendance       Int?
+  initiative                  Int?
+  responsibilityDependability Int?
+  professionalBehavior        Int?
+
+  // IV. COMMUNICATION & TEAMWORK (15%)
+  communicationSkills         Int?
+  teamworkCollaboration       Int?
+  customerClientInteraction   Int?
+
+  // Computed scores
+  workPerformanceScore        Float?
+  knowledgeSkillsScore        Float?
+  workAttitudeScore           Float?
+  communicationTeamworkScore  Float?
+  totalScore                  Float?
+
+  comments                    String? @db.Text
+  evaluatorSignature          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+  @@map("ojt_evaluations")
+}
+
+// =========================================================================
+// TASK / ACTIVITY MANAGEMENT
+// =========================================================================
+
+model Task {
+  id        String  @id @default(uuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  title         String
+  description   String?
+  date          DateTime?
+  status        TaskStatus @default(UNDONE)
+  skillsLearned String?
+  remarks       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([status])
+  @@map("tasks")
+}
+
+// =========================================================================
+// NARRATIVE REPORT (OJT Summary / Preview)
+// =========================================================================
+
+model NarrativeReport {
+  id        String                @id @default(uuid())
+  studentId String                @unique
+  student   Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  content   String                @db.Text
+  status    NarrativeReportStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+  @@map("narrative_reports")
+}
+
+// =========================================================================
+// ANNOUNCEMENTS
+// =========================================================================
+
+model Announcement {
+  id      String @id @default(uuid())
+  title   String
+  content String @db.Text
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id])
+
+  priority String @default("NORMAL")
+  audience String @default("ALL")
+
+  publishedAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([audience])
+  @@index([publishedAt])
+  @@map("announcements")
+}
+
+// =========================================================================
+// NOTIFICATIONS
+// =========================================================================
+
+model Notification {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  category NotificationCategory
+  title    String
+  message  String
+  link     String?
+  isRead   Boolean            @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// =========================================================================
+// AUDIT TRAIL
+// =========================================================================
+
+model AuditLog {
+  id     String  @id @default(uuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action      String
+  description String?
+  entityType  String?
+  entityId    String?
+  ipAddress   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// =========================================================================
+// SYSTEM SETTINGS
+// =========================================================================
+
+model SystemSetting {
+  id          String  @id @default(uuid())
+  key         String  @unique
+  value       String
+  description String?
+
+  updatedById String?
+  updatedBy   User?    @relation(fields: [updatedById], references: [id])
+  updatedAt   DateTime @updatedAt
+
+  @@map("system_settings")
+}
